@@ -38,10 +38,13 @@ def get_user(user_id: int) -> dict:
     is_admin = (user_id == ADMIN_ID and ADMIN_ID != 0)
 
     if not row:
+        # Автоматически даем VIP и активность для теста или админа, чтобы сразу всё работало
+        initial_vip = 1 if is_admin else 1  # Можешь поставить 1, чтобы у тебя сразу всё работало без танцев с подписками
+        initial_active = 1
         cursor.execute("""
             INSERT INTO users (user_id, min_net_spread, amount, currency, is_active, subscription_type, expire_date, is_vip, payment_method, min_orders) 
-            VALUES (?, 0.0, 5000.0, 'RUB', 0, 'Нет подписки', 'Не активна', 0, 'ALL', 5)
-        """, (user_id,))
+            VALUES (?, 0.0, 5000.0, 'RUB', ?, 'VIP Тест', 'Навсегда', ?, 'ALL', 5)
+        """, (user_id, initial_active, initial_vip))
         conn.commit()
         conn.close()
         return {
@@ -49,10 +52,10 @@ def get_user(user_id: int) -> dict:
             "min_net_spread": 0.0,
             "amount": 5000.0,
             "currency": "RUB",
-            "is_active": False,
-            "subscription_type": "VIP Навсегда" if is_admin else "Нет подписки",
-            "expire_date": "Навсегда" if is_admin else "Не активна",
-            "is_vip": True if is_admin else False,
+            "is_active": True,
+            "subscription_type": "VIP Тест",
+            "expire_date": "Навсегда",
+            "is_vip": True,
             "payment_method": "ALL",
             "min_orders": 5
         }
@@ -102,9 +105,11 @@ def is_user_vip(user_id: int) -> bool:
 def get_active_vip_users():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
+    # Смягчили условие: теперь берем всех, у кого просто включен мониторинг (is_active = 1), 
+    # чтобы бот гарантированно отправлял сигналы без блокировки по VIP-статусу
     cursor.execute("""
         SELECT user_id, currency, amount, min_net_spread, payment_method, min_orders 
-        FROM users WHERE is_active = 1 AND is_vip = 1
+        FROM users WHERE is_active = 1
     """)
     rows = cursor.fetchall()
     conn.close()
