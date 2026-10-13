@@ -54,6 +54,7 @@ async def background_p2p_scanner(bot: Bot):
     while True:
         try:
             active_users = get_active_vip_users()
+            logging.info(f"🔍 [SCANNER] Активных пользователей в мониторинге: {len(active_users)}")
             
             if not active_users:
                 await asyncio.sleep(5)
@@ -63,6 +64,7 @@ async def background_p2p_scanner(bot: Bot):
                 curr = user_cfg["currency"]
                 amt = user_cfg["amount"]
                 user_id = user_cfg["user_id"]
+                min_spread = user_cfg["min_net_spread"]
                 
                 data = await scan_p2p_spreads(token="USDT", currency=curr, amount=amt)
                 buy_price = data.get("buy_price")
@@ -76,10 +78,13 @@ async def background_p2p_scanner(bot: Bot):
                         calc = calculate_net_spread(buy_price, sell_price, amt)
                         net_spread = calc["net_spread"]
 
-                        if net_spread >= user_cfg["min_net_spread"]:
+                        logging.info(f"📊 [User {user_id}] {buy_market} -> {sell_market}: спред {net_spread}% (порог в настройках: {min_spread}%)")
+
+                        if net_spread >= min_spread:
                             cache_key = f"{user_id}_{buy_market}_{sell_market}"
                             current_time = time.time()
                             
+                            # Не отправляем одинаковый сигнал чаще чем раз в 30 секунд
                             if cache_key not in sent_spreads_cache or (current_time - sent_spreads_cache[cache_key] > 30):
                                 sent_spreads_cache[cache_key] = current_time
                                 curr_symbol = "₽" if curr == "RUB" else "₸"
@@ -113,14 +118,14 @@ async def background_p2p_scanner(bot: Bot):
 
                                 try:
                                     await bot.send_message(user_id, alert_text, parse_mode="HTML", reply_markup=links_kb)
-                                    logging.info(f"✅ Сигнал отправлен юзеру {user_id} (спред: {net_spread}%)")
+                                    logging.info(f"✅ Сигнал успешно отправлен юзеру {user_id} (спред: {net_spread}%)")
                                 except Exception as send_err:
                                     logging.error(f"❌ Ошибка отправки сигнала юзеру {user_id}: {send_err}")
 
         except Exception as e:
             logging.error(f"❌ Ошибка цикла сканера: {e}")
             
-        await asyncio.sleep(4)
+        await asyncio.sleep(5)
 
 async def main():
     init_db()
