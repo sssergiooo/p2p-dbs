@@ -39,9 +39,8 @@ def get_user(user_id: int) -> dict:
     row = cursor.fetchone()
 
     if not row:
-        # Для обычных пользователей ЖЕСТКО 0 (без VIP и без активности)
         initial_vip = 1 if is_admin else 0
-        initial_active = 1 if is_admin else 0
+        initial_active = 0
         sub_desc = "VIP Навсегда" if is_admin else "Нет подписки"
         exp_desc = "Навсегда" if is_admin else "Не активна"
         
@@ -50,16 +49,24 @@ def get_user(user_id: int) -> dict:
             VALUES (?, 0.0, 5000.0, 'RUB', ?, ?, ?, ?, 'ALL', 5)
         """, (user_id, initial_active, sub_desc, exp_desc, initial_vip))
         conn.commit()
-        row = (0.0, 5000.0, 'RUB', initial_active, sub_desc, exp_desc, initial_vip, 'ALL', 5)
+        
+        cursor.execute("""
+            SELECT min_net_spread, amount, currency, is_active, subscription_type, 
+                   expire_date, is_vip, payment_method, min_orders 
+            FROM users WHERE user_id = ?
+        """, (user_id,))
+        row = cursor.fetchone()
 
-    # Принудительно держим VIP только для тебя и админа
+    # Принудительно держим ТОЛЬКО VIP-статус, НЕ перезаписывая is_active принудительно
     if is_admin:
-        cursor.execute("UPDATE users SET is_vip = 1, is_active = 1 WHERE user_id = ?", (user_id,))
+        cursor.execute("UPDATE users SET is_vip = 1 WHERE user_id = ?", (user_id,))
         conn.commit()
-        row_list = list(row)
-        row_list[3] = 1  # is_active
-        row_list[6] = 1  # is_vip
-        row = tuple(row_list)
+        cursor.execute("""
+            SELECT min_net_spread, amount, currency, is_active, subscription_type, 
+                   expire_date, is_vip, payment_method, min_orders 
+            FROM users WHERE user_id = ?
+        """, (user_id,))
+        row = cursor.fetchone()
 
     conn.close()
     
@@ -94,7 +101,7 @@ def set_user_vip(user_id: int, days: int):
     exp_text = "Навсегда" if days > 360 else f"Через {days} дн."
     cursor.execute("""
         UPDATE users 
-        SET is_vip = 1, is_active = 1, subscription_type = ?, expire_date = ? 
+        SET is_vip = 1, subscription_type = ?, expire_date = ? 
         WHERE user_id = ?
     """, (sub_type, exp_text, user_id))
     conn.commit()
@@ -109,7 +116,6 @@ def is_user_vip(user_id: int) -> bool:
 def get_active_vip_users():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    # СКАНИРУЕТ И ОТПРАВЛЯЕТ ТОЛЬКО ТЕМ, У КОГО В БАЗЕ ЕСТЬ VIP (is_vip = 1) И ВКЛЮЧЕН СКАНЕР (is_active = 1)
     cursor.execute("""
         SELECT user_id, currency, amount, min_net_spread, payment_method, min_orders 
         FROM users WHERE is_active = 1 AND is_vip = 1
