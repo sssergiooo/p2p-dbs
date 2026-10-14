@@ -20,7 +20,8 @@ DB_PATH = "/data/database.db" if os.path.exists("/data") else "database.db"
 
 def get_main_keyboard(user_id: int) -> InlineKeyboardMarkup:
     cfg = get_user(user_id)
-    toggle_text = "🔴 Остановить монитор" if cfg["is_active"] else "🚀 Запустить авто-сканер"
+    is_active = cfg["is_active"]
+    toggle_text = "🔴 Остановить монитор" if is_active else "🚀 Запустить авто-сканер"
 
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -130,23 +131,25 @@ async def toggle_monitor(call: CallbackQuery):
         await call.answer("❌ Доступ ограничен! Приобретите VIP-подписку.", show_alert=True)
         return
 
-    # Прямой запрос в SQLite без кэширования
+    # Читаем состояние напрямую из базы
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("SELECT is_active FROM users WHERE user_id = ?", (user_id,))
     row = cursor.fetchone()
-    current_active = row[0] if row else 0
+    current_val = row[0] if row else 0
     
-    # Инвертируем состояние
-    new_status = 0 if current_active == 1 else 1
+    # Меняем ровно наоборот: если 0 -> ставим 1, если 1 -> ставим 0
+    new_val = 1 if current_val == 0 else 0
     
-    cursor.execute("UPDATE users SET is_active = ? WHERE user_id = ?", (new_status, user_id))
+    cursor.execute("UPDATE users SET is_active = ? WHERE user_id = ?", (new_val, user_id))
     conn.commit()
     conn.close()
     
-    status_str = "запущен 🟢" if new_status == 1 else "остановлен 🔴"
+    status_str = "запущен 🟢" if new_val == 1 else "остановлен 🔴"
     await call.answer(f"Авто-сканер {status_str}", show_alert=True)
+    
     try:
+        # Перерисовываем клавиатуру с новым состоянием
         await call.message.edit_reply_markup(reply_markup=get_main_keyboard(user_id))
     except Exception:
         pass
