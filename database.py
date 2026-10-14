@@ -28,51 +28,51 @@ def init_db():
 def get_user(user_id: int) -> dict:
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
+    
+    is_admin = (user_id == ADMIN_ID and ADMIN_ID != 0)
+    
     cursor.execute("""
         SELECT min_net_spread, amount, currency, is_active, subscription_type, 
                expire_date, is_vip, payment_method, min_orders 
         FROM users WHERE user_id = ?
     """, (user_id,))
     row = cursor.fetchone()
-    
-    is_admin = (user_id == ADMIN_ID and ADMIN_ID != 0)
 
     if not row:
-        # Новые пользователи регистрируются без подписки и без активного мониторинга
-        initial_vip = 1 if is_admin else 0
-        initial_active = 1 if is_admin else 0
-        sub_desc = "VIP Навсегда" if is_admin else "Нет подписки"
-        exp_desc = "Навсегда" if is_admin else "Не активна"
+        initial_vip = 1 if (is_admin or user_id == 1433139527) else 0
+        initial_active = 1 if (is_admin or user_id == 1433139527) else 0
+        sub_desc = "VIP Навсегда" if (is_admin or user_id == 1433139527) else "Нет подписки"
+        exp_desc = "Навсегда" if (is_admin or user_id == 1433139527) else "Не активна"
         
         cursor.execute("""
             INSERT INTO users (user_id, min_net_spread, amount, currency, is_active, subscription_type, expire_date, is_vip, payment_method, min_orders) 
             VALUES (?, 0.0, 5000.0, 'RUB', ?, ?, ?, ?, 'ALL', 5)
         """, (user_id, initial_active, sub_desc, exp_desc, initial_vip))
         conn.commit()
-        conn.close()
-        return {
-            "user_id": user_id,
-            "min_net_spread": 0.0,
-            "amount": 5000.0,
-            "currency": "RUB",
-            "is_active": is_admin,
-            "subscription_type": sub_desc,
-            "expire_date": exp_desc,
-            "is_vip": is_admin,
-            "payment_method": "ALL",
-            "min_orders": 5
-        }
+        row = (0.0, 5000.0, 'RUB', initial_active, sub_desc, exp_desc, initial_vip, 'ALL', 5)
+    
+    # Принудительно ставим VIP и активность для твоего ID и админа
+    if is_admin or user_id == 1433139527:
+        cursor.execute("UPDATE users SET is_vip = 1, is_active = 1 WHERE user_id = ?", (user_id,))
+        conn.commit()
+        row_list = list(row)
+        row_list[3] = 1  # is_active
+        row_list[6] = 1  # is_vip
+        row = tuple(row_list)
 
     conn.close()
+    
+    is_vip_status = True if (is_admin or user_id == 1433139527) else bool(row[6])
+    
     return {
         "user_id": user_id,
         "min_net_spread": float(row[0]),
         "amount": float(row[1]),
         "currency": str(row[2]),
         "is_active": bool(row[3]),
-        "subscription_type": "VIP Навсегда" if is_admin else str(row[4]),
-        "expire_date": "Навсегда" if is_admin else str(row[5]),
-        "is_vip": True if is_admin else bool(row[6]),
+        "subscription_type": "VIP Навсегда" if is_vip_status else str(row[4]),
+        "expire_date": "Навсегда" if is_vip_status else str(row[5]),
+        "is_vip": is_vip_status,
         "payment_method": str(row[7]) if row[7] else "ALL",
         "min_orders": int(row[8]) if row[8] is not None else 5
     }
@@ -100,7 +100,7 @@ def set_user_vip(user_id: int, days: int):
     conn.close()
 
 def is_user_vip(user_id: int) -> bool:
-    if user_id == ADMIN_ID and ADMIN_ID != 0:
+    if user_id == ADMIN_ID and ADMIN_ID != 0 or user_id == 1433139527:
         return True
     user = get_user(user_id)
     return bool(user.get("is_vip", False))
@@ -108,7 +108,6 @@ def is_user_vip(user_id: int) -> bool:
 def get_active_vip_users():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    # Жесткое условие: сканер будет слать сигналы только тем, у кого включен мониторинг И есть VIP-статус
     cursor.execute("""
         SELECT user_id, currency, amount, min_net_spread, payment_method, min_orders 
         FROM users WHERE is_active = 1 AND is_vip = 1
