@@ -39,6 +39,7 @@ def get_user(user_id: int) -> dict:
     row = cursor.fetchone()
 
     if not row:
+        # Для абсолютно всех новых юзеров — строго ноль (нет VIP, сканер выключен)
         initial_vip = 1 if is_admin else 0
         initial_active = 0
         sub_desc = "VIP Навсегда" if is_admin else "Нет подписки"
@@ -57,9 +58,9 @@ def get_user(user_id: int) -> dict:
         """, (user_id,))
         row = cursor.fetchone()
 
-    # Принудительно держим ТОЛЬКО VIP-статус, НЕ перезаписывая is_active принудительно
-    if is_admin:
-        cursor.execute("UPDATE users SET is_vip = 1 WHERE user_id = ?", (user_id,))
+    # Если это админ/твой ID, страхуем, что VIP всегда активен, но активность (is_active) управляема кнопкой
+    if is_admin and row[6] == 0:
+        cursor.execute("UPDATE users SET is_vip = 1, subscription_type = 'VIP Навсегда', expire_date = 'Навсегда' WHERE user_id = ?", (user_id,))
         conn.commit()
         cursor.execute("""
             SELECT min_net_spread, amount, currency, is_active, subscription_type, 
@@ -99,9 +100,10 @@ def set_user_vip(user_id: int, days: int):
     cursor = conn.cursor()
     sub_type = "VIP Навсегда" if days > 360 else "VIP 30 дней"
     exp_text = "Навсегда" if days > 360 else f"Через {days} дн."
+    # При покупке сразу выдаем VIP и включаем сканер в готовность
     cursor.execute("""
         UPDATE users 
-        SET is_vip = 1, subscription_type = ?, expire_date = ? 
+        SET is_vip = 1, is_active = 1, subscription_type = ?, expire_date = ? 
         WHERE user_id = ?
     """, (sub_type, exp_text, user_id))
     conn.commit()
@@ -116,6 +118,7 @@ def is_user_vip(user_id: int) -> bool:
 def get_active_vip_users():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
+    # СТРОГОЕ УСЛОВИЕ: бот отправляет сигналы только тем, у кого куплен VIP И включен тумблер мониторинга
     cursor.execute("""
         SELECT user_id, currency, amount, min_net_spread, payment_method, min_orders 
         FROM users WHERE is_active = 1 AND is_vip = 1
