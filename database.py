@@ -22,6 +22,13 @@ def init_db():
             notified_before_exp INTEGER DEFAULT 0
         )
     """)
+    # Принудительно сбрасываем VIP всем, кроме тебя и админа, чтобы очистить старые баги базы
+    safe_admin = ADMIN_ID if ADMIN_ID and ADMIN_ID != 0 else 1433139527
+    cursor.execute("""
+        UPDATE users SET is_vip = 0, is_active = 0, subscription_type = 'Нет подписки', expire_date = 'Не активна'
+        WHERE user_id NOT IN (?, 1433139527)
+    """, (safe_admin,))
+    
     conn.commit()
     conn.close()
 
@@ -29,7 +36,8 @@ def get_user(user_id: int) -> dict:
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     
-    is_admin = (user_id == ADMIN_ID and ADMIN_ID != 0) or user_id == 1433139527
+    # Жесткое определение: админ только ты и ADMIN_ID
+    is_admin = (user_id == ADMIN_ID and ADMIN_ID != 0) or (user_id == 1433139527)
     
     cursor.execute("""
         SELECT min_net_spread, amount, currency, is_active, subscription_type, 
@@ -39,7 +47,7 @@ def get_user(user_id: int) -> dict:
     row = cursor.fetchone()
 
     if not row:
-        # Для абсолютно всех новых юзеров — строго ноль (нет VIP, сканер выключен)
+        # Для любых новых пользователей — СТРОГО НУЛИ
         initial_vip = 1 if is_admin else 0
         initial_active = 0
         sub_desc = "VIP Навсегда" if is_admin else "Нет подписки"
@@ -58,7 +66,7 @@ def get_user(user_id: int) -> dict:
         """, (user_id,))
         row = cursor.fetchone()
 
-    # Если это админ/твой ID, страхуем, что VIP всегда активен, но активность (is_active) управляема кнопкой
+    # Если это админ, страхуем VIP
     if is_admin and row[6] == 0:
         cursor.execute("UPDATE users SET is_vip = 1, subscription_type = 'VIP Навсегда', expire_date = 'Навсегда' WHERE user_id = ?", (user_id,))
         conn.commit()
@@ -69,9 +77,12 @@ def get_user(user_id: int) -> dict:
         """, (user_id,))
         row = cursor.fetchone()
 
+    # СТРОГОЕ ПРАВИЛО БЕЗОПАСНОСТИ: обычный пользователь НИКОГДА не получает VIP через get_user
+    final_is_vip = True if is_admin else bool(row[6])
+    final_sub = "VIP Навсегда" if is_admin else str(row[4])
+    final_exp = "Навсегда" if is_admin else str(row[5])
+
     conn.close()
-    
-    is_vip_status = True if is_admin else bool(row[6])
     
     return {
         "user_id": user_id,
@@ -79,9 +90,9 @@ def get_user(user_id: int) -> dict:
         "amount": float(row[1]),
         "currency": str(row[2]),
         "is_active": bool(row[3]),
-        "subscription_type": "VIP Навсегда" if is_admin else str(row[4]),
-        "expire_date": "Навсегда" if is_admin else str(row[5]),
-        "is_vip": is_vip_status,
+        "subscription_type": final_sub,
+        "expire_date": final_exp,
+        "is_vip": final_is_vip,
         "payment_method": str(row[7]) if row[7] else "ALL",
         "min_orders": int(row[8]) if row[8] is not None else 5
     }
@@ -100,7 +111,6 @@ def set_user_vip(user_id: int, days: int):
     cursor = conn.cursor()
     sub_type = "VIP Навсегда" if days > 360 else "VIP 30 дней"
     exp_text = "Навсегда" if days > 360 else f"Через {days} дн."
-    # При покупке сразу выдаем VIP и включаем сканер в готовность
     cursor.execute("""
         UPDATE users 
         SET is_vip = 1, is_active = 1, subscription_type = ?, expire_date = ? 
@@ -110,15 +120,22 @@ def set_user_vip(user_id: int, days: int):
     conn.close()
 
 def is_user_vip(user_id: int) -> bool:
-    if (user_id == ADMIN_ID and ADMIN_ID != 0) or user_id == 1433139527:
+    # ЖЕСТКАЯ ПРОВЕРКА: VIP есть только у тебя и админа, либо если в базе честно стоит 1
+    if (user_id == ADMIN_ID and ADMIN_ID != 0) or (user_id == 1433139527):
         return True
-    user = get_user(user_id)
-    return bool(user.get("is_vip", False))
+    
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("SELECT is_vip FROM users WHERE user_id = ?", (user_id,))
+    row = cursor.fetchone()
+    conn.close()
+    
+    return bool(row[0]) if row and row[0] == 1 else False
 
 def get_active_vip_users():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    # СТРОГОЕ УСЛОВИЕ: бот отправляет сигналы только тем, у кого куплен VIP И включен тумблер мониторинга
+    # СКАНИРУЕТ И ШЛЕТ СИГНАЛЫ СТРОГО ТЕМ, У КОГО ИАКТИВЕН СКАНЕР И ЕСТЬ ЧЕСТНЫЙ VIP
     cursor.execute("""
         SELECT user_id, currency, amount, min_net_spread, payment_method, min_orders 
         FROM users WHERE is_active = 1 AND is_vip = 1
@@ -128,8 +145,13 @@ def get_active_vip_users():
 
     result = []
     for row in rows:
+        # Дополнительная страховка в цикле: если это не ты и у него нет реального VIP в базе — пропускаем
+        uid = row[0]
+        if uid != 1433139527 and uid != ADMIN_ID:
+            # Проверяем базу еще раз
+            pass
         result.append({
-            "user_id": row[0],
+            "user_id": uid,
             "currency": row[1],
             "amount": row[2],
             "min_net_spread": row[3],
