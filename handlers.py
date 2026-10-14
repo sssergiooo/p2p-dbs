@@ -20,7 +20,9 @@ DB_PATH = "/data/database.db" if os.path.exists("/data") else "database.db"
 
 def get_main_keyboard(user_id: int) -> InlineKeyboardMarkup:
     cfg = get_user(user_id)
-    toggle_text = "🔴 Остановить монитор" if cfg["is_active"] else "🚀 Запустить авто-сканер"
+    # Для админа и твоего ID мониторинг всегда визуально активен
+    is_forced_active = cfg["is_active"] or (user_id == ADMIN_ID or user_id == 1433139527)
+    toggle_text = "🔴 Остановить монитор" if is_forced_active else "🚀 Запустить авто-сканер"
 
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -125,13 +127,18 @@ async def back_to_main(call: CallbackQuery):
 @router.callback_query(F.data == "toggle_monitor")
 async def toggle_monitor(call: CallbackQuery):
     user_id = call.from_user.id
-    cfg = get_user(user_id)
-
+    
     if not is_user_vip(user_id):
         await call.answer("❌ Доступ ограничен! Приобретите VIP-подписку.", show_alert=True)
         return
 
-    new_status = not cfg["is_active"]
+    cfg = get_user(user_id)
+    # Принудительно держим активность включенной для админа/твоего ID
+    if user_id == ADMIN_ID or user_id == 1433139527:
+        new_status = True
+    else:
+        new_status = not cfg["is_active"]
+        
     update_user_field(user_id, "is_active", 1 if new_status else 0)
     
     status_str = "запущен 🟢" if new_status else "остановлен 🔴"
