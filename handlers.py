@@ -130,13 +130,21 @@ async def toggle_monitor(call: CallbackQuery):
         await call.answer("❌ Доступ ограничен! Приобретите VIP-подписку.", show_alert=True)
         return
 
-    cfg = get_user(user_id)
-    # Честное переключение 1 -> 0 или 0 -> 1 по нажатию кнопки
-    new_status = 0 if cfg["is_active"] else 1
-        
-    update_user_field(user_id, "is_active", new_status)
+    # Прямой запрос в SQLite без кэширования
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT is_active FROM users WHERE user_id = ?", (user_id,))
+    row = cursor.fetchone()
+    current_active = row[0] if row else 0
     
-    status_str = "запущен 🟢" if new_status else "остановлен 🔴"
+    # Инвертируем состояние
+    new_status = 0 if current_active == 1 else 1
+    
+    cursor.execute("UPDATE users SET is_active = ? WHERE user_id = ?", (new_status, user_id))
+    conn.commit()
+    conn.close()
+    
+    status_str = "запущен 🟢" if new_status == 1 else "остановлен 🔴"
     await call.answer(f"Авто-сканер {status_str}", show_alert=True)
     try:
         await call.message.edit_reply_markup(reply_markup=get_main_keyboard(user_id))
