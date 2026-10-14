@@ -20,8 +20,7 @@ DB_PATH = "/data/database.db" if os.path.exists("/data") else "database.db"
 
 def get_main_keyboard(user_id: int) -> InlineKeyboardMarkup:
     cfg = get_user(user_id)
-    is_active = cfg["is_active"]
-    toggle_text = "🔴 Остановить монитор" if is_active else "🚀 Запустить авто-сканер"
+    toggle_text = "🔴 Остановить монитор" if cfg["is_active"] else "🚀 Запустить авто-сканер"
 
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -127,18 +126,17 @@ async def back_to_main(call: CallbackQuery):
 async def toggle_monitor(call: CallbackQuery):
     user_id = call.from_user.id
     
+    # Жесткая проверка: если нет VIP, кнопка не даст запустить сканер
     if not is_user_vip(user_id):
         await call.answer("❌ Доступ ограничен! Приобретите VIP-подписку.", show_alert=True)
         return
 
-    # Читаем состояние напрямую из базы
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("SELECT is_active FROM users WHERE user_id = ?", (user_id,))
     row = cursor.fetchone()
     current_val = row[0] if row else 0
     
-    # Меняем ровно наоборот: если 0 -> ставим 1, если 1 -> ставим 0
     new_val = 1 if current_val == 0 else 0
     
     cursor.execute("UPDATE users SET is_active = ? WHERE user_id = ?", (new_val, user_id))
@@ -149,7 +147,6 @@ async def toggle_monitor(call: CallbackQuery):
     await call.answer(f"Авто-сканер {status_str}", show_alert=True)
     
     try:
-        # Перерисовываем клавиатуру с новым состоянием
         await call.message.edit_reply_markup(reply_markup=get_main_keyboard(user_id))
     except Exception:
         pass
