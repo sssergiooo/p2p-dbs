@@ -20,9 +20,7 @@ DB_PATH = "/data/database.db" if os.path.exists("/data") else "database.db"
 
 def get_main_keyboard(user_id: int) -> InlineKeyboardMarkup:
     cfg = get_user(user_id)
-    # Для админа и твоего ID мониторинг всегда визуально активен
-    is_forced_active = cfg["is_active"] or (user_id == ADMIN_ID or user_id == 1433139527)
-    toggle_text = "🔴 Остановить монитор" if is_forced_active else "🚀 Запустить авто-сканер"
+    toggle_text = "🔴 Остановить монитор" if cfg["is_active"] else "🚀 Запустить авто-сканер"
 
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -133,13 +131,10 @@ async def toggle_monitor(call: CallbackQuery):
         return
 
     cfg = get_user(user_id)
-    # Принудительно держим активность включенной для админа/твоего ID
-    if user_id == ADMIN_ID or user_id == 1433139527:
-        new_status = True
-    else:
-        new_status = not cfg["is_active"]
+    # Честное переключение 1 -> 0 или 0 -> 1 по нажатию кнопки
+    new_status = 0 if cfg["is_active"] else 1
         
-    update_user_field(user_id, "is_active", 1 if new_status else 0)
+    update_user_field(user_id, "is_active", new_status)
     
     status_str = "запущен 🟢" if new_status else "остановлен 🔴"
     await call.answer(f"Авто-сканер {status_str}", show_alert=True)
